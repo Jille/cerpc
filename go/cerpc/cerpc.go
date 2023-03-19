@@ -187,6 +187,7 @@ type cerpcRequest struct {
 	r *http.Request
 }
 
+// AddHeader sets a header to be returned by the current cerpc HTTP request.
 func AddHeader(ctx context.Context, key, value string) bool {
 	r, ok := ctx.Value(myContextKey).(*cerpcRequest)
 	if !ok {
@@ -196,6 +197,13 @@ func AddHeader(ctx context.Context, key, value string) bool {
 	return true
 }
 
+// GetCookie gets a cookie from the current request. The current request is determined from the context.
 func GetCookie(ctx context.Context, key string) (*http.Cookie, error) {
 	return ctx.Value(myContextKey).(*cerpcRequest).r.Cookie(key)
+}
+
+// AttachRequest creates a new context that has the given ResponseWriter and Request attached. It allows GetCookie and AddHeader on the returned context.
+// Most users don't need this function because it's automatically attached when using the cerpc generated http handler.
+func AttachRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) context.Context {
+	return context.WithValue(ctx, myContextKey, &cerpcRequest{w, r})
 }
