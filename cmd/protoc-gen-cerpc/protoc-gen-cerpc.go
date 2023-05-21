@@ -120,7 +120,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (", s.GoName, "_", m.GoName, "Client, error) {")
 					g.P("	ctx, cancel := context.WithCancel(ctx)")
 				}
-				g.P(`	stream, err := `, cerpc("InternalDoClientStream"), `(ctx, c.baseUrl+"/`, s.GoName, `/`, m.GoName, `", c.options)`)
+				g.P(`	stream, err := `, cerpc("InternalDoClientStream"), fmt.Sprintf("(ctx, c.baseUrl+%q, c.options)", "/"+string(s.Desc.FullName())+"/"+m.GoName))
 				g.P("	if err != nil {")
 				if !m.Desc.IsStreamingClient() {
 					g.P("		cancel()")
@@ -140,7 +140,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 			} else {
 				g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (*", m.Output.GoIdent, ", error) {")
 				g.P("	resp := new(", m.Output.GoIdent, ")")
-				g.P(`	err := `, cerpc("InternalDoClientRequest"), `(ctx, c.baseUrl+"/`, s.GoName, `/`, m.GoName, `", req, resp, c.options)`)
+				g.P(`	err := `, cerpc("InternalDoClientRequest"), fmt.Sprintf("(ctx, c.baseUrl+%q, req, resp, c.options)", "/"+string(s.Desc.FullName())+"/"+m.GoName))
 				g.P("	return resp, err")
 				g.P("}")
 			}
