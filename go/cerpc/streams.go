@@ -2,11 +2,14 @@ package cerpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"path"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -54,12 +57,14 @@ func InternalUpgrade(w http.ResponseWriter, r *http.Request, handler func(grpc.S
 	if p, err := net.ResolveTCPAddr("tcp", r.RemoteAddr); err == nil {
 		ctx = peer.NewContext(ctx, &peer.Peer{Addr: p})
 	}
-	wss := &websocketStream{
-		ws:       ws,
-		ctx:      ctx,
-		cancel:   cancel,
-		incoming: make(chan []byte),
-		readErr:  nil,
+	wss := &websocketServerStream{
+		websocketStream: websocketStream{
+			ws:       ws,
+			ctx:      ctx,
+			cancel:   cancel,
+			incoming: make(chan []byte),
+			readErr:  nil,
+		},
 	}
 	go wss.backgroundReader()
 	if err := rpcz.StreamServerInterceptor(nil, wss, &grpc.StreamServerInfo{
@@ -86,6 +91,73 @@ func InternalUpgrade(w http.ResponseWriter, r *http.Request, handler func(grpc.S
 	// Wait for the channel to close (discarding incoming messages). This will effectively happen when the client sent us a CloseMessage (in response to ours).
 	for range wss.incoming {
 	}
+}
+
+func InternalDoClientStream(ctx context.Context, urlString string, options []ClientOption) (grpc.ClientStream, error) {
+	return rpcz.StreamClientInterceptor(ctx, &grpc.StreamDesc{
+		StreamName: path.Base(urlString),
+	}, nil, urlString, func(ctx context.Context, _ *grpc.StreamDesc, _ *grpc.ClientConn, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
+		return doClientStreamAfterRpcz(ctx, urlString, options)
+	})
+}
+
+func doClientStreamAfterRpcz(ctx context.Context, urlString string, options []ClientOption) (grpc.ClientStream, error) {
+	co := clientOptions{
+		headers: http.Header{},
+	}
+	for _, o := range options {
+		o(&co)
+	}
+
+	ws, response, err := co.websocketDialer.DialContext(ctx, startsWithHttpRe.ReplaceAllString(urlString, "ws"), co.headers)
+	if err != nil {
+		if response == nil {
+			return nil, err
+		}
+		if response.StatusCode == 200 {
+			return nil, status.Error(codes.Internal, "HTTP 200 response when trying to initiate websocket")
+		}
+		respBytes, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			if st := status.FromContextError(err); st.Code() != codes.Unknown {
+				return nil, st.Err()
+			}
+			return nil, status.Errorf(codes.Unavailable, "failed to read HTTP response: %v", err)
+		}
+		if err := response.Body.Close(); err != nil {
+			if st := status.FromContextError(err); st.Code() != codes.Unknown {
+				return nil, st.Err()
+			}
+			return nil, status.Errorf(codes.Unavailable, "failed to read HTTP response: %v", err)
+		}
+		if response.Header.Get("Content-Type") != "application/json" {
+			return nil, status.Errorf(codes.Internal, "HTTP %d error response was not JSON: %s", response.StatusCode, respBytes)
+		}
+		var e struct {
+			Code codes.Code `json:"code"`
+			Msg  string     `json:"msg"`
+		}
+		if err := json.Unmarshal(respBytes, &e); err != nil {
+			return nil, status.Errorf(codes.Internal, "HTTP %d error response was not valid JSON: %s", response.StatusCode, respBytes)
+		}
+		if e.Code == codes.OK {
+			return nil, status.Errorf(codes.Internal, "HTTP %d error response contained code 0 (OK): %s", response.StatusCode, respBytes)
+		}
+		return nil, status.Error(e.Code, e.Msg)
+	}
+	done := make(chan struct{})
+	wss := &websocketClientStream{
+		websocketStream: websocketStream{
+			ws:       ws,
+			ctx:      ctx,
+			cancel:   func() { close(done) },
+			incoming: make(chan []byte),
+			readErr:  nil,
+		},
+	}
+	go wss.backgroundReader()
+	go wss.contextWatcher(done)
+	return wss, nil
 }
 
 type websocketStream struct {
@@ -183,18 +255,59 @@ func (w *websocketStream) RecvMsg(m interface{}) error {
 	}
 }
 
-func (w *websocketStream) SetHeader(metadata.MD) error {
-	return status.Error(codes.Unimplemented, "websocketStream.SetHeader() is not implemented")
+type websocketServerStream struct {
+	websocketStream
 }
 
-func (w *websocketStream) SendHeader(metadata.MD) error {
-	return status.Error(codes.Unimplemented, "websocketStream.SendHeader() is not implemented")
+func (w *websocketServerStream) SetHeader(metadata.MD) error {
+	return status.Error(codes.Unimplemented, "websocketServerStream.SetHeader() is not implemented")
 }
 
-func (w *websocketStream) SetTrailer(metadata.MD) {
+func (w *websocketServerStream) SendHeader(metadata.MD) error {
+	return status.Error(codes.Unimplemented, "websocketServerStream.SendHeader() is not implemented")
 }
 
-var _ grpc.ServerStream = (*websocketStream)(nil)
+func (w *websocketServerStream) SetTrailer(metadata.MD) {
+}
+
+var _ grpc.ServerStream = (*websocketServerStream)(nil)
+
+type websocketClientStream struct {
+	websocketStream
+}
+
+func (w *websocketClientStream) Header() (metadata.MD, error) {
+	return nil, status.Error(codes.Unimplemented, "websocketClientStream.Header() is not implemented")
+}
+
+func (w *websocketClientStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (w *websocketClientStream) CloseSend() error {
+	w.ws.SetWriteDeadline(time.Now().Add(time.Minute))
+	if err := w.ws.WriteMessage(websocket.TextMessage, []byte("closeSend")); err != nil {
+		w.ws.Close()
+		return status.Errorf(codes.Internal, "websocketStream.CloseSend(): WriteMessage(): %v", err)
+	}
+	w.ws.SetWriteDeadline(time.Time{})
+	return nil
+}
+
+// contextWatcher closes the websocket when the context is done.
+// It runs only for client streams (because for server streams we own the context).
+func (w *websocketClientStream) contextWatcher(done chan struct{}) {
+	select {
+	case <-w.ctx.Done():
+		st := status.FromContextError(w.ctx.Err())
+		w.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, fmt.Sprintf("%s: %s", st.Code().String(), st.Message())), websocketControlDeadline())
+	case <-done:
+		// The backgroundReader() called cancel() (and then died). This connection is gone, nothing left for us to do.
+		return
+	}
+}
+
+var _ grpc.ClientStream = (*websocketClientStream)(nil)
 
 func codeFromString(c string) codes.Code {
 	ret := codes.Unknown

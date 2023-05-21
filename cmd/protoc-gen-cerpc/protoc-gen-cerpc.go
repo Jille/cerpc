@@ -96,5 +96,55 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 		g.P(cerpc("InternalRejectUnknownRPC"), `(w, path.Base(r.URL.Path))`)
 		g.P("	}")
 		g.P("}")
+
+		g.P()
+		g.P("func New", s.GoName, "CeRPCClient(baseUrl string, options ...", cerpc("ClientOption"), ") ", s.GoName, "CeRPCClient {")
+		g.P("	return ", s.GoName, "CeRPCClient{")
+		g.P(`		baseUrl: `, protogen.GoIdent{"TrimSuffix", "strings"}, `(baseUrl, "/"),`)
+		g.P("		options: options,")
+		g.P("	}")
+		g.P("}")
+
+		g.P()
+		g.P("type ", s.GoName, "CeRPCClient struct{")
+		g.P("	baseUrl string")
+		g.P("	options []", cerpc("ClientOption"))
+		g.P("}")
+		g.P()
+
+		for _, m := range s.Methods {
+			if m.Desc.IsStreamingClient() || m.Desc.IsStreamingServer() {
+				if m.Desc.IsStreamingClient() {
+					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context) (", s.GoName, "_", m.GoName, "Client, error) {")
+				} else {
+					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (", s.GoName, "_", m.GoName, "Client, error) {")
+					g.P("	ctx, cancel := context.WithCancel(ctx)")
+				}
+				g.P(`	stream, err := `, cerpc("InternalDoClientStream"), `(ctx, c.baseUrl+"/`, s.GoName, `/`, m.GoName, `", c.options)`)
+				g.P("	if err != nil {")
+				if !m.Desc.IsStreamingClient() {
+					g.P("		cancel()")
+				}
+				g.P("		return nil, err")
+				g.P("	}")
+				g.P("	sw := &", strings.ToLower(s.GoName[:1]), s.GoName[1:], m.GoName, "Client{stream}")
+				if !m.Desc.IsStreamingClient() {
+					g.P("	if err := stream.SendMsg(req); err != nil {")
+					g.P("		cancel()")
+					g.P("		return nil, err")
+					g.P("	}")
+					g.P("	", protogen.GoIdent{"SetFinalizer", "runtime"}, "(sw, func(*", strings.ToLower(s.GoName[:1]), s.GoName[1:], m.GoName, "Client) { cancel() })")
+				}
+				g.P("	return sw, nil")
+				g.P("}")
+			} else {
+				g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (*", m.Output.GoIdent, ", error) {")
+				g.P("	resp := new(", m.Output.GoIdent, ")")
+				g.P(`	err := `, cerpc("InternalDoClientRequest"), `(ctx, c.baseUrl+"/`, s.GoName, `/`, m.GoName, `", req, resp, c.options)`)
+				g.P("	return resp, err")
+				g.P("}")
+			}
+			g.P()
+		}
 	}
 }
