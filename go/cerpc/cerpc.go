@@ -199,12 +199,17 @@ func AddHeader(ctx context.Context, key, value string) bool {
 
 // GetCookie gets a cookie from the current request. The current request is determined from the context.
 func GetCookie(ctx context.Context, key string) (*http.Cookie, error) {
-	return ctx.Value(myContextKey).(*cerpcRequest).r.Cookie(key)
+	return GetRequest(ctx).Cookie(key)
 }
 
 // GetHeader gets the first value of the header associated with key from the current request. The current request is determined from the context.
 func GetHeader(ctx context.Context, key string) string {
-	return ctx.Value(myContextKey).(*cerpcRequest).r.Header.Get(key)
+	return GetRequest(ctx).Header.Get(key)
+}
+
+// GetRequest gets the current request from the context.
+func GetRequest(ctx context.Context) *http.Request {
+	return ctx.Value(myContextKey).(*cerpcRequest).r
 }
 
 // AttachRequest creates a new context that has the given ResponseWriter and Request attached. It allows GetCookie and AddHeader on the returned context.
