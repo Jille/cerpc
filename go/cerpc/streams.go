@@ -31,7 +31,7 @@ var (
 			return true
 		},
 		Error: func(w http.ResponseWriter, r *http.Request, status int, reason error) {
-			fail(w, status, codes.Unknown, reason.Error())
+			ErrorHandler(w, status, codes.Unknown, reason.Error())
 		},
 	}
 

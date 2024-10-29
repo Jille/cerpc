@@ -46,7 +46,7 @@ func InternalHandleRequest(w http.ResponseWriter, r *http.Request, inMsg proto.M
 	// Check if the context was already cancelled before we even called the handler.
 	if err := ctx.Err(); err != nil {
 		// 499 is nginx's non-standard "Client Closed Request" response code.
-		fail(w, 499, codes.Canceled, fmt.Sprintf("request was cancelled before RPC handler was called: %v", err))
+		ErrorHandler(w, 499, codes.Canceled, fmt.Sprintf("request was cancelled before RPC handler was called: %v", err))
 		return
 	}
 
@@ -74,7 +74,7 @@ func InternalHandleRequest(w http.ResponseWriter, r *http.Request, inMsg proto.M
 	}
 	resp, err := encoder(outMsg)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, codes.Internal, fmt.Sprintf("failed to encode response as %s: %v", contentType, err))
+		ErrorHandler(w, http.StatusInternalServerError, codes.Internal, fmt.Sprintf("failed to encode response as %s: %v", contentType, err))
 		return
 	}
 
@@ -90,14 +90,14 @@ func InternalHandleRequest(w http.ResponseWriter, r *http.Request, inMsg proto.M
 
 func InternalDecodeRequest(w http.ResponseWriter, r *http.Request, inMsg proto.Message) bool {
 	if r.Method != "POST" {
-		fail(w, http.StatusMethodNotAllowed, codes.InvalidArgument, "RPCs must be done as POST requests")
+		ErrorHandler(w, http.StatusMethodNotAllowed, codes.InvalidArgument, "RPCs must be done as POST requests")
 		return false
 	}
 
 	buf, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		r.Body.Close()
-		fail(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to read request body: %v", err))
+		ErrorHandler(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to read request body: %v", err))
 		return false
 	}
 	r.Body.Close()
@@ -106,18 +106,18 @@ func InternalDecodeRequest(w http.ResponseWriter, r *http.Request, inMsg proto.M
 	switch ct {
 	case "application/json":
 		if err := protojson.Unmarshal(buf, inMsg); err != nil {
-			fail(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to decode request json-protobuf: %v", err))
+			ErrorHandler(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to decode request json-protobuf: %v", err))
 			return false
 		}
 		return true
 	case "application/protobuf":
 		if err := proto.Unmarshal(buf, inMsg); err != nil {
-			fail(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to decode request protobuf: %v", err))
+			ErrorHandler(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("failed to decode request protobuf: %v", err))
 			return false
 		}
 		return true
 	default:
-		fail(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("unexpected Content-Type: %q", r.Header.Get("Content-Type")))
+		ErrorHandler(w, http.StatusBadRequest, codes.InvalidArgument, fmt.Sprintf("unexpected Content-Type: %q", r.Header.Get("Content-Type")))
 		return false
 	}
 }
@@ -126,7 +126,7 @@ func panicHandler(w http.ResponseWriter) {
 	if r := recover(); r != nil {
 		log.Printf("Panic in HTTP request: %v", r)
 		debug.PrintStack()
-		fail(w, http.StatusInternalServerError, codes.Internal, fmt.Sprintf("panic: %v", r))
+		ErrorHandler(w, http.StatusInternalServerError, codes.Internal, fmt.Sprintf("panic: %v", r))
 	}
 }
 
@@ -143,8 +143,16 @@ func errorToJSON(c codes.Code, msg string) []byte {
 	return b
 }
 
-func fail(w http.ResponseWriter, httpCode int, grpcCode codes.Code, msg string) {
+// ErrorHandler is called whenever something went wrong, either in the cerpc framework or the receiving call.
+// The ErrorHandler is responsible for responding to the HTTP request, and optionally logging.
+var ErrorHandler = func(w http.ResponseWriter, httpCode int, grpcCode codes.Code, msg string) {
 	log.Printf("Failed HTTP RPC: httpCode=%d, grpcCode=%s, msg=%q", httpCode, grpcCode.String(), msg)
+	DefaultErrorHandler(w, httpCode, grpcCode, msg)
+}
+
+// DefaultErrorHandler sends the given error back to the given ResponseWriter.
+// The name is slightly misleading, because the actual default ErrorHandler adds a log.Printf call in addition to calling DefaultErrorHandler.
+func DefaultErrorHandler(w http.ResponseWriter, httpCode int, grpcCode codes.Code, msg string) {
 	// Error responses are always JSON
 	body := errorToJSON(grpcCode, msg)
 
@@ -171,11 +179,11 @@ func WriteError(w http.ResponseWriter, err error) {
 	default:
 		// The rest doesn't really map cleanly/safely/exactly.
 	}
-	fail(w, httpCode, st.Code(), st.Message())
+	ErrorHandler(w, httpCode, st.Code(), st.Message())
 }
 
 func InternalRejectUnknownRPC(w http.ResponseWriter, name string) {
-	fail(w, http.StatusNotFound, codes.NotFound, name+": RPC not found")
+	ErrorHandler(w, http.StatusNotFound, codes.NotFound, name+": RPC not found")
 }
 
 type contextKey int
