@@ -115,9 +115,9 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 		for _, m := range s.Methods {
 			if m.Desc.IsStreamingClient() || m.Desc.IsStreamingServer() {
 				if m.Desc.IsStreamingClient() {
-					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context) (", s.GoName, "_", m.GoName, "Client, error) {")
+					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx ", protogen.GoIdent{"Context", "context"}, ") (", s.GoName, "_", m.GoName, "Client, error) {")
 				} else {
-					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (", s.GoName, "_", m.GoName, "Client, error) {")
+					g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx ", protogen.GoIdent{"Context", "context"}, ", req *", m.Input.GoIdent, ") (", s.GoName, "_", m.GoName, "Client, error) {")
 					g.P("	ctx, cancel := context.WithCancel(ctx)")
 				}
 				g.P(`	stream, err := `, cerpc("InternalDoClientStream"), fmt.Sprintf("(ctx, c.baseUrl+%q, c.options)", "/"+string(s.Desc.FullName())+"/"+m.GoName))
@@ -138,7 +138,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 				g.P("	return sw, nil")
 				g.P("}")
 			} else {
-				g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx context.Context, req *", m.Input.GoIdent, ") (*", m.Output.GoIdent, ", error) {")
+				g.P("func (c ", s.GoName, "CeRPCClient) ", m.GoName, "(ctx ", protogen.GoIdent{"Context", "context"}, ", req *", m.Input.GoIdent, ") (*", m.Output.GoIdent, ", error) {")
 				g.P("	resp := new(", m.Output.GoIdent, ")")
 				g.P(`	err := `, cerpc("InternalDoClientRequest"), fmt.Sprintf("(ctx, c.baseUrl+%q, req, resp, c.options)", "/"+string(s.Desc.FullName())+"/"+m.GoName))
 				g.P("	return resp, err")
