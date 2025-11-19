@@ -4,7 +4,6 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/pluginpb"
@@ -73,7 +72,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 			g.P(fmt.Sprintf("	case %q:", m.Desc.Name()))
 			if m.Desc.IsStreamingClient() || m.Desc.IsStreamingServer() {
 				g.P("		", cerpc("InternalUpgrade"), "(w, r, func(stream ", grpc("ServerStream"), ") error {")
-				g.P("			sw := &", strings.ToLower(s.GoName[:1]), s.GoName[1:], m.GoName, "Server{stream}")
+				g.P("			sw := &grpc.GenericServerStream[", m.Input.GoIdent, ", ", m.Output.GoIdent, "]{stream}")
 				if !m.Desc.IsStreamingClient() {
 					g.P("			req := new(", m.Input.GoIdent, ")")
 					g.P("			if err := sw.RecvMsg(req); err != nil {")
@@ -127,13 +126,13 @@ func generateFile(gen *protogen.Plugin, file *protogen.File) {
 				}
 				g.P("		return nil, err")
 				g.P("	}")
-				g.P("	sw := &", strings.ToLower(s.GoName[:1]), s.GoName[1:], m.GoName, "Client{stream}")
+				g.P("	sw := &grpc.GenericClientStream[", m.Input.GoIdent, ", ", m.Output.GoIdent, "]{stream}")
 				if !m.Desc.IsStreamingClient() {
 					g.P("	if err := stream.SendMsg(req); err != nil {")
 					g.P("		cancel()")
 					g.P("		return nil, err")
 					g.P("	}")
-					g.P("	", protogen.GoIdent{"SetFinalizer", "runtime"}, "(sw, func(*", strings.ToLower(s.GoName[:1]), s.GoName[1:], m.GoName, "Client) { cancel() })")
+					g.P("	", protogen.GoIdent{"AddCleanup", "runtime"}, "(sw, func(struct{}) { cancel() }, struct{}{})")
 				}
 				g.P("	return sw, nil")
 				g.P("}")
