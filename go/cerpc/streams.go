@@ -57,6 +57,7 @@ func InternalUpgrade(w http.ResponseWriter, r *http.Request, handler func(grpc.S
 	if p, err := net.ResolveTCPAddr("tcp", r.RemoteAddr); err == nil {
 		ctx = peer.NewContext(ctx, &peer.Peer{Addr: p})
 	}
+	ctx = AttachRequest(ctx, nil, r)
 	wss := &websocketServerStream{
 		websocketStream: websocketStream{
 			ws:       ws,

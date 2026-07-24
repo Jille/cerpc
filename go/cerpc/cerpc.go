@@ -41,7 +41,7 @@ func InternalHandleRequest(w http.ResponseWriter, r *http.Request, inMsg proto.M
 		return
 	}
 	ctx := r.Context()
-	ctx = context.WithValue(ctx, myContextKey, &cerpcRequest{w, r})
+	ctx = AttachRequest(ctx, w, r)
 
 	// Check if the context was already cancelled before we even called the handler.
 	if err := ctx.Err(); err != nil {
