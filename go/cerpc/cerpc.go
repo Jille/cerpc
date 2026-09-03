@@ -220,6 +220,12 @@ func GetRequest(ctx context.Context) *http.Request {
 	return ctx.Value(myContextKey).(*cerpcRequest).r
 }
 
+// IsCeRPCRequest returns whether this context has cerpc info attached. In other words: whether we're in a cerpc request handler.
+func IsCeRPCRequest(ctx context.Context) bool {
+	_, ok := ctx.Value(myContextKey).(*cerpcRequest)
+	return ok
+}
+
 // AttachRequest creates a new context that has the given ResponseWriter and Request attached. It allows GetCookie and AddHeader on the returned context.
 // Most users don't need this function because it's automatically attached when using the cerpc generated http handler.
 func AttachRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) context.Context {
