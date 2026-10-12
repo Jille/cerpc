@@ -3,6 +3,7 @@ package cerpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -83,7 +84,7 @@ func InternalUpgrade(w http.ResponseWriter, r *http.Request, handler func(grpc.S
 			log.Printf("cerpc stream: Failed to send CloseMessage with error (%v): %v", st.Err(), err)
 		}
 	} else {
-		if err := ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "OK"), websocketControlDeadline()); err != nil {
+		if err := ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "OK"), websocketControlDeadline()); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
 			log.Printf("cerpc stream: Failed to send CloseMessage with success: %v", err)
 		}
 	}
